@@ -10,6 +10,7 @@ import pickle
 import yaml
 import datasets
 from typing import List, Dict, Any, Optional
+import os
 
 from utils.prompts import default_prompt_gsm8k_cot
 
@@ -56,7 +57,8 @@ def generate_traces(
     system_prompt = default_prompt_gsm8k_cot
     # Limit examples if specified
     if limit:
-        dataset = dataset.select(range(min(limit, len(dataset))))
+        print(f"Limiting dataset to {limit} examples")
+        dataset = dataset.select(range(limit))
 
     ### Create Chats ###
     chats, questions, answers = create_chats(dataset)
@@ -109,6 +111,7 @@ def generate_traces(
     torch.cuda.empty_cache()
     gc.collect()
 
+    hf_token = os.environ.get("HF_TOKEN")
     tokenizer = AutoTokenizer.from_pretrained(model_name, use_fast=False, token=hf_token)
     
     completions = []
@@ -171,13 +174,13 @@ if __name__ == "__main__":
     parser.add_argument(
         "--model_name",
         type=str,
-        default=None,
+        default="Qwen/Qwen3-8B",
         help="Name of the model to load from Hugging Face.",
     )
     parser.add_argument(
         "--dataset_name",
         type=str,
-        default=None,
+        default='gsm8k',
         help="Name of the dataset ('gsm8k', 'math', 'gpqa').",
     )
     parser.add_argument(
@@ -195,7 +198,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--limit",
         type=int,
-        default=None,
+        default=50,
         help="Limit number of examples to process (for testing).",
     )
     parser.add_argument(

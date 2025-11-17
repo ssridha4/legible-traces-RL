@@ -21,7 +21,7 @@ vllm_kwargs:
 
 # Dataset configuration
 dataset_split: "train"  # For datasets that support splits (train, test, etc.)
-limit: null  # null = process all examples
+limit: 50  # null = process all examples
 
 # Output configuration
 output:
