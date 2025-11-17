@@ -1,173 +1,115 @@
-# # # ####################################################### # # #
-# # #              Generate Reasoning Traces                  # # #
-# # # ####################################################### # # #
-
-# TODO: Add connections, APPS, MMLU
-# TODO: More graceful dataset handling
-# TODO: Investigate Magistral failures
-
 from datetime import datetime
-import random
-import datasets
-from dotenv import load_dotenv
-import os
-from fastapi import params
+import argparse
+import time
 import torch
 import gc
 from tqdm import tqdm
 from transformers import AutoTokenizer
-from vllm import vllm
+from vllm import LLM, SamplingParams
 import pickle
-import argparse
 import yaml
-import os.path as osp
+import datasets
+from typing import List, Dict, Any, Optional
 
-from src.utils import math_parser
-from src.utils.extractors import extract_answer, extract_trace
-from src.utils.graders import grade_answer
-from src.utils.prompts import REASONING_SYSTEM_PROMPTS, format_mcq
+from utils.prompts import default_prompt_gsm8k_cot
 
-def load_dataset(dataset_name: str):
+def create_chats(
+    dataset: Any,
+) -> tuple:
     """
-    Dataset loader for supported datasets.
-    """
-    if dataset_name == 'math':
-        dataset = datasets.load_from_disk("math_consolidated_test")
-    elif dataset_name == 'gpqa':
-        dataset = datasets.load_dataset("Idavidrein/gpqa", "gpqa_main", split="train")
-    else:
-        raise NotImplementedError(f"Dataset {dataset_name} not supported.")
-    return dataset
-
-
-def get_question_answer(dataset_name, item):
-    """
-    Given a dataset and an element, return the question prompt and (a) ground truth answer.
-    Only supports 'math' and 'gpqa' for now.
-
-    """
-    if dataset_name == 'math':
-        return item['problem'], math_parser.extract_answer(item['solution'])
+    Create chat prompts for the dataset.
     
-    elif dataset_name == 'gpqa':
-        question = item['Question']
-        choices = [
-            item["Correct Answer"],
-            item["Incorrect Answer 1"],
-            item["Incorrect Answer 2"],
-            item["Incorrect Answer 3"],
-        ]
-        random.shuffle(choices)
-        # ground truth letter (after shuffle)
-        correct_letter = "ABCD"[choices.index(item["Correct Answer"])]
-        answer = correct_letter
-        return f"{format_mcq(question, choices)}", answer
-    
-    else:
-        raise NotImplementedError(f"Dataset {dataset_name} not supported.")
-
-def generate_traces(
-        model_name: str,
-        dataset_name: str,
-        verbose: bool = False,
-        **kwargs
-    ):
+    Returns:
+        Tuple of (chats, questions, answers)
     """
-    Generate reasoning traces to study as artifacts.
-    Arguments:
-    - model_name: str, name or path of the model to use.
-    - dataset_name: str, name of the dataset to use ('math' or 'gpqa').
-    - verbose: bool, whether to print progress information.
-    - kwargs: additional keyword arguments to pass to the vLLM
-    """
-
-    ### Initialization ###
-    print("KWARGS")
-    print(kwargs)
-
-    load_dotenv()
-    hf_token = os.getenv("HF_TOKEN")
-    os.environ['TOKENIZERS_PARALLELISM'] = 'false'
-    os.environ['PYTORCH_CUDA_ALLOC_CONF'] = 'expandable_segments:True,max_split_size_mb:512'
-    if verbose:
-        print(f"Loading dataset: {dataset_name}")
-
-    dataset = load_dataset(dataset_name)
-    system_prompt = REASONING_SYSTEM_PROMPTS.get(dataset_name, "")
-    if verbose:
-        print(f"Dataset {dataset_name} loaded with {len(dataset)} examples.")
-        if system_prompt != "":
-            print(f"Using system prompt for {dataset_name}")
-
-
-    ### Create Chats ###
-
-    llama_user_prompt = {
-        "math": "Solve the following math problem efficiently and clearly:\n\n- For simple problems (2 steps or fewer):\nProvide a concise solution with minimal explanation.\n\n- For complex problems (3 steps or more):\nUse this step-by-step format:\n\n## Step 1: [Concise description]\n[Brief explanation and calculations]\n\n## Step 2: [Concise description]\n[Brief explanation and calculations]\n\n...\n\nRegardless of the approach, always conclude with:\n\nTherefore, the final answer is: $\\boxed{answer}$. I hope it is correct.\n\nWhere [answer] is just the final number or expression that solves the problem.\n\nProblem:\n\n",
-    }
     chats = []
     questions = []
     answers = []
-    if "llama" in model_name.lower() and dataset_name in llama_user_prompt:
-            print("Using LLaMA user prompt format.")
+    
+    
     for item in tqdm(dataset, total=len(dataset), desc="Creating chats"):
-        question, answer = get_question_answer(dataset_name, item)
-        if "llama" in model_name.lower() and dataset_name in llama_user_prompt:
-            chats.append([
-                {
-                    "role": "user",
-                    "content": llama_user_prompt[dataset_name] + question,
-                }
-            ])
-        else:
-            chats.append([
-                {
-                    "role": "system",
-                    "content": system_prompt,
-                },
-                {
-                    "role": "user",
-                    "content": question,
-                }
-            ])
+        question, answer = item["question"], item["answer"]
+        
+        chats.append([{
+            "role": "user",
+            "content": question,
+        }])
+        
         questions.append(question)
         answers.append(answer)
     
-    ### Load Model and Run Inference ###
+    return chats, questions, answers
 
-    model_path = model_name
-    torch.cuda.empty_cache()
-    gc.collect()
+
+def generate_traces(
+    model_name: str,
+    dataset_name: str,
+    verbose: bool = False,
+    limit: Optional[int] = None,
+    dataset_split: Optional[str] = None,
+    show_sample_prompts: bool = True,
+    **kwargs
+):
+    # Load dataset with specified split
+    dataset = datasets.load_dataset(dataset_name, "main", split=dataset_split)
+
+    system_prompt = default_prompt_gsm8k_cot
+    # Limit examples if specified
+    if limit:
+        dataset = dataset.select(range(min(limit, len(dataset))))
+
+    ### Create Chats ###
+    chats, questions, answers = create_chats(dataset)
     
-    if verbose:
-        print(f"Loading model from {model_path}")
-
+    # Extract sampling parameters
     temperature = kwargs.pop("temperature", None)
     max_tokens = kwargs.pop("max_tokens", 8192)
-    if temperature is None:
-        params = vllm.SamplingParams(max_tokens=max_tokens, seed=42)
-    else:
-        params = vllm.SamplingParams(temperature=temperature, max_tokens=max_tokens, seed=42)
-    print("PARAMS")
-    print(params)
+    seed = kwargs.pop("seed", 42)
+    top_p = kwargs.pop("top_p", None)
 
-    model = vllm.LLM(model=model_path,
-                     tokenizer=model_path,
-                     hf_token=hf_token,
-                     **kwargs
-                    )
-    if verbose:
-        print("Model loaded")
-        print(f"Running inference on {len(chats)} prompts")
+    # Create sampling params
+    sampling_kwargs = {"max_tokens": max_tokens, "seed": seed}
+    if temperature is not None:
+        sampling_kwargs["temperature"] = temperature
+    if top_p is not None:
+        sampling_kwargs["top_p"] = top_p
+    
+    params = SamplingParams(**sampling_kwargs)
 
+    if "tensor_parallel_size" not in kwargs or kwargs.get("tensor_parallel_size") is None:
+        num_gpus = torch.cuda.device_count()
+        if num_gpus > 1:
+            kwargs["tensor_parallel_size"] = num_gpus
+            print(f"Auto-detected {num_gpus} GPUs, using tensor parallelism")
+        elif "tensor_parallel_size" in kwargs:
+            # Remove None value if only 1 GPU
+            kwargs.pop("tensor_parallel_size")
+
+    filtered_kwargs = {k: v for k, v in kwargs.items() if v is not None}
+    
+    # Initialize model
+    model_kwargs = {
+        "model": model_name,
+        "tokenizer": model_name,
+        **filtered_kwargs
+    }
+
+    model = LLM(**model_kwargs)
+
+    print("Model loaded")
+    print(f"Running inference on {len(chats)} prompts")
+
+    start_time = time.time()
     response = model.chat(chats, params)
+    inference_time = time.time() - start_time
+
+    print(f"Inference completed in {inference_time:.2f} seconds")
+    print(f"Throughput: {len(chats) / inference_time:.2f} examples/sec")
+    
     torch.cuda.empty_cache()
     gc.collect()
 
-    if verbose:
-        print("Inference completed")
-    response = response[:len(dataset)] 
-    tokenizer = AutoTokenizer.from_pretrained(model_name, use_fast=False)
+    tokenizer = AutoTokenizer.from_pretrained(model_name, use_fast=False, token=hf_token)
     
     completions = []
     traces = []
@@ -177,45 +119,55 @@ def generate_traces(
     
     for i, output in tqdm(enumerate(response), total=len(response), desc="Processing outputs"):
         completion = tokenizer.decode(output.prompt_token_ids + output.outputs[0].token_ids)
-        trace = extract_trace(completion, model_name)
-        extracted_answer = extract_answer(completion, dataset_name, model_name)
-        score = grade_answer(dataset_name, extracted_answer, answers[i])
+        # trace = extract_trace(completion, model_name)
+        # extracted_answer = extract_answer(completion, dataset_name, model_name)
+        # score = grade_answer(dataset_name, extracted_answer, answers[i])
         
         completions.append(completion)
-        traces.append(trace)
-        extracted_answers.append(extracted_answer)
-        scores.append(score)
+        # traces.append(trace)
+        # extracted_answers.append(extracted_answer)
+        # scores.append(score)
         finished.append(output.finished)
-
+    
     output = {
         "metadata": {
             "model_name": model_name,
             "dataset_name": dataset_name,
             "collected_on": str(datetime.now()),
             "system_prompt": system_prompt,
+            "num_gpus": torch.cuda.device_count(),
             "generation_params": {
                 "temperature": temperature,
                 "max_tokens": max_tokens,
+                "top_p": top_p,
+                "seed": seed,
             },
             "kwargs": {k: str(v) for k, v in kwargs.items()},
+            "inference_time": inference_time,
+            "throughput": len(chats) / inference_time if inference_time > 0 else 0,
         },
         "data": {
             "questions": questions,
             "completions": completions,
-            "traces": traces,
-            "extracted_answers": extracted_answers,
-            "scores": scores,
+            # "traces": traces,
+            # "extracted_answers": extracted_answers,
+            # "scores": scores,
             "ground_truth_answers": answers,
+            "finished": finished,
         }
     }
+    
     if verbose:
         print("Finished!")
-        
+        accuracy = sum(scores) / len(scores) if scores else 0
+        print(f"Accuracy: {accuracy:.2%}")
+    
     return output
 
-
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser()
+    parser = argparse.ArgumentParser(
+        description="Generate reasoning traces for evaluation"
+    )
     parser.add_argument(
         "--model_name",
         type=str,
@@ -226,7 +178,7 @@ if __name__ == "__main__":
         "--dataset_name",
         type=str,
         default=None,
-        help="Name of the dataset to load from disk.",
+        help="Name of the dataset ('gsm8k', 'math', 'gpqa').",
     )
     parser.add_argument(
         "--output_dir",
@@ -235,62 +187,88 @@ if __name__ == "__main__":
         help="Directory to save generated traces.",
     )
     parser.add_argument(
-        "--verbose",
-        action="store_true",
-        help="Whether to print verbose logs.",
-    )
-    parser.add_argument(
         "--config",
         type=str,
         default=None,
-        help="Path to a config file (YAML) with defaulty generation parameters.",
+        help="Path to a config file (YAML) with default generation parameters.",
+    )
+    parser.add_argument(
+        "--limit",
+        type=int,
+        default=None,
+        help="Limit number of examples to process (for testing).",
+    )
+    parser.add_argument(
+        "--tensor_parallel_size",
+        type=int,
+        default=None,
+        help="Number of GPUs for tensor parallelism (default: auto-detect).",
+    )
+    parser.add_argument(
+        "--dataset_split",
+        type=str,
+        default=None,
+        help="Dataset split to use (e.g., 'train', 'test'). Default depends on dataset.",
     )
     args = parser.parse_args()
 
-    print("ARGS")
-    print(args)
     ### Loading YAML Config ###
-
     config = {}
     if args.config:
         with open(args.config, 'r') as f:
             config = yaml.safe_load(f)
-            
+    
     call_kwargs = {}
-    # copy vllm kwargs if present
+    # Copy vllm kwargs if present, filtering out None values
     if isinstance(config.get("vllm_kwargs"), dict):
-        call_kwargs.update(config["vllm_kwargs"])
-    # sampling params
+        # Filter out None values from config (null in YAML becomes None)
+        filtered_vllm_kwargs = {k: v for k, v in config["vllm_kwargs"].items() if v is not None}
+        call_kwargs.update(filtered_vllm_kwargs)
+    # Sampling params
     if "temperature" in config:
         call_kwargs["temperature"] = config["temperature"]
     if "max_tokens" in config:
         call_kwargs["max_tokens"] = config["max_tokens"]
-
-    print("CALL KWARGS")
-    print(call_kwargs)
-
+    if "top_p" in config:
+        call_kwargs["top_p"] = config["top_p"]
+    if "seed" in config:
+        call_kwargs["seed"] = config["seed"]
+    
+    # Get dataset split from config or args
+    dataset_split = args.dataset_split
+    if dataset_split is None and "dataset_split" in config:
+        dataset_split = config["dataset_split"]
+    
+    # Override tensor_parallel_size from command line if provided
+    if args.tensor_parallel_size is not None:
+        call_kwargs["tensor_parallel_size"] = args.tensor_parallel_size
+    
     if 'model_name' in config and args.model_name is None:
         args.model_name = config['model_name']
     if 'dataset_name' in config and args.dataset_name is None:
         args.dataset_name = config['dataset_name']
+    
     assert args.model_name is not None, "Model name must be specified via --model_name or config file."
     assert args.dataset_name is not None, "Dataset name must be specified via --dataset_name or config file."
-
+    
     output = generate_traces(
         model_name=args.model_name,
         dataset_name=args.dataset_name,
-        verbose=args.verbose,
+        limit=args.limit,
+        dataset_split=dataset_split,
         **call_kwargs
     )
-
-    output_dir = osp.join(args.output_dir, args.dataset_name.replace("/", "_"))
-    os.makedirs(args.output_dir, exist_ok=True)
-    output_path = osp.join(
+    
+    # Save output
+    output_dir = os.path.join(args.output_dir, args.dataset_name.replace("/", "_"))
+    os.makedirs(output_dir, exist_ok=True)
+    
+    output_path = os.path.join(
         output_dir,
         f"traces_{args.model_name.replace('/', '_')}.pkl"
     )
-
+    
     with open(output_path, "wb") as f:
         pickle.dump(output, f)
-
+    
     print(f"Generated traces saved to {output_path}")
