@@ -290,9 +290,10 @@ if __name__ == "__main__":
     output_dir = os.path.join(args.output_dir, args.dataset_name.replace("/", "_"))
     os.makedirs(output_dir, exist_ok=True)
     
+    prompt_variant = call_kwargs["prompt_variant"]
     output_path = os.path.join(
         output_dir,
-        f"traces_{args.model_name.replace('/', '_')}_{call_kwargs["prompt_variant"]}.pkl"
+        f"traces_{args.model_name.replace('/', '_')}_{prompt_variant}.pkl"
     )
     
     with open(output_path, "wb") as f:
