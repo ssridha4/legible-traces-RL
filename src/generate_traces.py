@@ -12,10 +12,18 @@ import datasets
 from typing import List, Dict, Any, Optional
 import os
 
-from utils.prompts import default_prompt_gsm8k_cot
+from utils.prompts import default_prompt_gsm8k_cot, prompt_variant_numbered, prompt_variant_self_check, prompt_variant_structured
+
+prompt_variants = {
+    "default": default_prompt_gsm8k_cot,
+    "numbered": prompt_variant_numbered,
+    "self_check": prompt_variant_self_check,
+    "structured": prompt_variant_structured,
+}
 
 def create_chats(
     dataset: Any,
+    system_prompt: str,
 ) -> tuple:
     """
     Create chat prompts for the dataset.
@@ -32,6 +40,9 @@ def create_chats(
         question, answer = item["question"], item["answer"]
         
         chats.append([{
+            "role": "system",
+            "content": system_prompt,
+        }, {
             "role": "user",
             "content": question,
         }])
@@ -54,14 +65,17 @@ def generate_traces(
     # Load dataset with specified split
     dataset = datasets.load_dataset(dataset_name, "main", split=dataset_split)
 
-    system_prompt = default_prompt_gsm8k_cot
     # Limit examples if specified
     if limit:
         print(f"Limiting dataset to {limit} examples")
         dataset = dataset.select(range(limit))
+    
+    prompt_variant = kwargs.pop("prompt_variant", "default")
+    system_prompt = prompt_variants[prompt_variant]
 
     ### Create Chats ###
-    chats, questions, answers = create_chats(dataset)
+    print(f"Using system prompt: {system_prompt}")
+    chats, questions, answers = create_chats(dataset, system_prompt)
     
     # Extract sampling parameters
     temperature = kwargs.pop("temperature", None)
@@ -198,7 +212,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--limit",
         type=int,
-        default=50,
+        default=None,
         help="Limit number of examples to process (for testing).",
     )
     parser.add_argument(
@@ -212,6 +226,13 @@ if __name__ == "__main__":
         type=str,
         default=None,
         help="Dataset split to use (e.g., 'train', 'test'). Default depends on dataset.",
+    )
+    parser.add_argument(
+        "--prompt_variant",
+        type=str,
+        default="default",
+        help="Prompt variant to use (default: 'default').",
+        choices=list(prompt_variants.keys()),
     )
     args = parser.parse_args()
 
@@ -227,6 +248,7 @@ if __name__ == "__main__":
         # Filter out None values from config (null in YAML becomes None)
         filtered_vllm_kwargs = {k: v for k, v in config["vllm_kwargs"].items() if v is not None}
         call_kwargs.update(filtered_vllm_kwargs)
+    
     # Sampling params
     if "temperature" in config:
         call_kwargs["temperature"] = config["temperature"]
@@ -236,6 +258,8 @@ if __name__ == "__main__":
         call_kwargs["top_p"] = config["top_p"]
     if "seed" in config:
         call_kwargs["seed"] = config["seed"]
+    if "prompt_variant" in config:
+        call_kwargs["prompt_variant"] = config["prompt_variant"]
     
     # Get dataset split from config or args
     dataset_split = args.dataset_split

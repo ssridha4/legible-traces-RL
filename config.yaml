@@ -7,9 +7,10 @@ dataset_name: "gsm8k"  # gsm8k, math, gpqa
 
 # Generation parameters
 temperature: 0.7
-max_tokens: 2048
+max_tokens: 4096
 top_p: 0.9
 seed: 42
+prompt_variant: "default"  # default, numbered, self_check, structured
 
 # vLLM configuration
 vllm_kwargs:
@@ -21,7 +22,7 @@ vllm_kwargs:
 
 # Dataset configuration
 dataset_split: "train"  # For datasets that support splits (train, test, etc.)
-limit: 50  # null = process all examples
+limit: null  # null = process all examples
 
 # Output configuration
 output:
