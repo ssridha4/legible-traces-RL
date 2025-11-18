@@ -292,7 +292,7 @@ if __name__ == "__main__":
     
     output_path = os.path.join(
         output_dir,
-        f"traces_{args.model_name.replace('/', '_')}.pkl"
+        f"traces_{args.model_name.replace('/', '_')}_{call_kwargs["prompt_variant"]}.pkl"
     )
     
     with open(output_path, "wb") as f:
