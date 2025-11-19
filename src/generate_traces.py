@@ -12,7 +12,7 @@ import datasets
 from typing import List, Dict, Any, Optional
 import os
 
-from utils.prompts import default_prompt_gsm8k_cot, prompt_variant_numbered, prompt_variant_self_check, prompt_variant_structured
+from .utils.prompts import default_prompt_gsm8k_cot, prompt_variant_numbered, prompt_variant_self_check, prompt_variant_structured
 
 prompt_variants = {
     "default": default_prompt_gsm8k_cot,
@@ -188,7 +188,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--model_name",
         type=str,
-        default="Qwen/Qwen3-8B",
+        default=None,
         help="Name of the model to load from Hugging Face.",
     )
     parser.add_argument(
@@ -287,7 +287,7 @@ if __name__ == "__main__":
     )
     
     # Save output
-    output_dir = os.path.join(args.output_dir, args.dataset_name.replace("/", "_"))
+    output_dir = os.path.join(args.output_dir, args.dataset_name.replace("/", "_"), dataset_split)
     os.makedirs(output_dir, exist_ok=True)
     
     prompt_variant = call_kwargs["prompt_variant"]
