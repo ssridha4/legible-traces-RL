@@ -133,9 +133,10 @@ def extract_ground_truth_answer(completion):
 
 
 def main(model_name):
-    root_dir = pathlib.Path("/data/user_data/ssridha4/legible-traces-RL")
+    # root_dir = pathlib.Path("/data/user_data/ssridha4/legible-traces-RL")
+    root_dir = pathlib.Path("/user_data/mdhawan/projects/categorization/code/external/legible-traces-RL")## "/data/user_data/ssridha4/legible-traces-RL"
 
-    traces_dir = root_dir / "outputs" / "traces" / "gsm8k" / "test"
+    traces_dir = root_dir / "outputs" / "traces" / "gsm8k" / f"{model_name.split('_')[1]}" / "test"
 
     # List of file variants to process
     variants = ["default", "numbered", "self_check", "structured"]
@@ -182,15 +183,15 @@ def main(model_name):
         print(f"Accuracy of predicted answers for {variant}: {accuracy}")
 
     
-    output_dir = root_dir / "outputs" / "data" / model_name
-    output_dir.mkdir(parents=True, exist_ok=True)
+    # output_dir = root_dir / "outputs" / "data" / model_name
+    # output_dir.mkdir(parents=True, exist_ok=True)
 
-    for variant, df in dataframes.items():
-        output_path = output_dir / f"dataframes_{variant}.csv"
-        df.to_csv(output_path, index=False)
-        print(f"Saved {variant} to {output_path}")
+    # for variant, df in dataframes.items():
+    #     output_path = output_dir / f"dataframes_{variant}.csv"
+    #     df.to_csv(output_path, index=False)
+    #     print(f"Saved {variant} to {output_path}")
 
     
 if __name__ == "__main__":
-    model_name = "Qwen_Qwen3-8B"
+    model_name = "Qwen_Qwen3-4B"
     main(model_name)

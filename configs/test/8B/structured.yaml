@@ -6,11 +6,11 @@ model_name: "Qwen/Qwen3-8B"  # Path or HuggingFace model ID
 dataset_name: "gsm8k"  # gsm8k, math, gpqa
 
 # Generation parameters
-temperature: 1.0
-max_tokens: 4096
-top_p: 0.95
-seed: 123
-prompt_variant: "self_check"  # default, numbered, self_check, structured
+temperature: 1.1
+max_tokens: 8192
+top_p: 0.98
+seed: 999
+prompt_variant: "structured"  # default, numbered, self_check, structured
 
 # vLLM configuration
 vllm_kwargs:
