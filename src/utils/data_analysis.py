@@ -76,41 +76,20 @@ def extract_predicted_answer(completion):
 
     text_after = completion[end_think.end():].lstrip()
 
-    # Edge case: #### immediately followed by <|im_end|>
-    edge_case_match = re.search(r'####\s*<\|im_end\|>', text_after)
-    if edge_case_match:
-        before = text_after[:edge_case_match.start()].rstrip()
-        # Take the last token (split by whitespace)
-        tokens = before.split()
-        match = tokens[-1] if tokens else ""
+    # Extract answer from \boxed{ ... }
+    ANS_RE = re.compile(r'\\boxed\{([^}]*)\}')
+    INVALID_ANS = "[invalid]"
 
-        ans_reg = re.compile(r"(\-?[0-9\.\,]+)")
-        match = ans_reg.search(match)
+
+    def extract_answer(completion):
+        match = ANS_RE.search(completion)
         if match:
-            try:
-                return float(match.group(1).replace(",", ""))
-            except:
-                return None
+            match_str = match.group(1).strip()
+            match_str = match_str.replace(",", "")
+            return match_str
         else:
-            return None
-
-    # Main case: #### ANSWER ...
-    main_match = re.search(r'####\s*(\S+)', text_after)
-    if main_match:
-        answer = main_match.group(1)
-        # Remove <|im_end|> if accidentally included
-        answer = answer.split('<|im_end|>')[0].strip()
-        ans_reg = re.compile(r"(\-?[0-9\.\,]+)")
-        match = ans_reg.search(answer)
-        if match:
-            try:
-                return float(match.group(1).replace(",", ""))
-            except:
-                return None
-        else:
-            return None
-
-    return None
+            return INVALID_ANS
+    return extract_answer(text_after)
 
 
 def extract_ground_truth_answer(completion):
@@ -118,25 +97,26 @@ def extract_ground_truth_answer(completion):
     Extract the final answer from an the ground truth response.
 
     """
-    ans_reg = re.compile(r"#### (\-?[0-9\.\,]+)")
+    ANS_RE = re.compile(r"#### (\-?[0-9\.\,]+)")
+    INVALID_ANS = "[invalid]"
 
-    match = ans_reg.search(completion)
-    if match:
-        match_str = match.group(1).strip()
-        match_str = match_str.replace(",", "")
-        try:
-            return float(match_str)
-        except:
-            return None
-    else:
-        return None
+
+    def extract_answer(completion):
+        match = ANS_RE.search(completion)
+        if match:
+            match_str = match.group(1).strip()
+            match_str = match_str.replace(",", "")
+            return match_str
+        else:
+            return INVALID_ANS
+    return extract_answer(completion)
 
 
 def main(model_name):
     # root_dir = pathlib.Path("/data/user_data/ssridha4/legible-traces-RL")
     root_dir = pathlib.Path("/user_data/mdhawan/projects/categorization/code/external/legible-traces-RL")## "/data/user_data/ssridha4/legible-traces-RL"
 
-    traces_dir = root_dir / "outputs" / "traces" / "gsm8k" / f"{model_name.split('_')[1]}" / "test"
+    traces_dir = root_dir / "outputs" / "traces" / "gsm8k" / "test"
 
     # List of file variants to process
     variants = ["default", "numbered", "self_check", "structured"]
@@ -183,15 +163,15 @@ def main(model_name):
         print(f"Accuracy of predicted answers for {variant}: {accuracy}")
 
     
-    # output_dir = root_dir / "outputs" / "data" / model_name
-    # output_dir.mkdir(parents=True, exist_ok=True)
+    output_dir = root_dir / "outputs" / "data" / model_name
+    output_dir.mkdir(parents=True, exist_ok=True)
 
-    # for variant, df in dataframes.items():
-    #     output_path = output_dir / f"dataframes_{variant}.csv"
-    #     df.to_csv(output_path, index=False)
-    #     print(f"Saved {variant} to {output_path}")
+    for variant, df in dataframes.items():
+        output_path = output_dir / f"dataframes_{variant}.csv"
+        df.to_csv(output_path, index=False)
+        print(f"Saved {variant} to {output_path}")
 
     
 if __name__ == "__main__":
-    model_name = "Qwen_Qwen3-4B"
+    model_name = "Qwen_Qwen3-8B"
     main(model_name)
