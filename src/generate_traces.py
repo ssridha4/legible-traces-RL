@@ -12,13 +12,14 @@ import datasets
 from typing import List, Dict, Any, Optional
 import os
 
-from .utils.prompts import default_prompt_gsm8k_cot, prompt_variant_numbered, prompt_variant_self_check, prompt_variant_structured
+from .utils.prompts import default_prompt_gsm8k_cot, prompt_variant_numbered, prompt_variant_self_check, prompt_variant_structured, prompt_variant_no_reasoning
 
 prompt_variants = {
     "default": default_prompt_gsm8k_cot,
     "numbered": prompt_variant_numbered,
     "self_check": prompt_variant_self_check,
     "structured": prompt_variant_structured,
+    "no_reasoning": prompt_variant_no_reasoning,
 }
 
 def create_chats(
@@ -116,7 +117,7 @@ def generate_traces(
     print(f"Running inference on {len(chats)} prompts")
 
     start_time = time.time()
-    response = model.chat(chats, params)
+    response = model.chat(chats, params, chat_template_kwargs={"enable_thinking": False if kwargs.get("prompt_variant") == "no_reasoning" else True})
     inference_time = time.time() - start_time
 
     print(f"Inference completed in {inference_time:.2f} seconds")

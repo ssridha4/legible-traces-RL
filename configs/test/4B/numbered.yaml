@@ -1,0 +1,32 @@
+# Configuration file for trace generation
+# You can override these values via command-line arguments
+
+# Model and dataset configuration
+model_name: "Qwen/Qwen3-4B"  # Path or HuggingFace model ID
+dataset_name: "gsm8k"  # gsm8k, math, gpqa
+
+# Generation parameters
+temperature: 0.6
+max_tokens: 2048
+top_p: 0.85
+seed: 7
+prompt_variant: "numbered"  # default, numbered, self_check, structured
+
+# vLLM configuration
+vllm_kwargs:
+  dtype: "auto"  # auto, float16, bfloat16, float32
+  trust_remote_code: false
+  max_model_len: null  # null = auto
+  max_num_batched_tokens: null  # null = auto
+  tensor_parallel_size: null  # null = auto-detect from available GPUs
+  max_num_seqs: 32
+  gpu_memory_utilization: 0.7
+
+# Dataset configuration
+dataset_split: "test"  # For datasets that support splits (train, test, etc.)
+limit: null  # null = process all examples
+
+# Output configuration
+output:
+  output_dir: "./outputs/traces/"
+  verbose: true
