@@ -39,3 +39,19 @@ Formatting instructions:
 
 Put your final answer within \\boxed{} at the end of your response.
 """
+
+prompt_variant_completions_no_reasoning = """
+You are a helpful assistant that solves grade school math problems. Using the given reasoning trace, compute the correct numeric answer. Do **NOT** provide any reasoning or intermediate steps, only provide the final answer. 
+
+Formatting instructions:
+
+Put your final answer within \\boxed{} at the end of your response.
+"""
+
+prompt_variant_completions_reasoning = """
+You are a helpful assistant that solves grade school math problems. Using the given reasoning trace, compute the correct numeric answer. Continue the reasoning trace from the last step until you reach the final answer.
+
+Formatting instructions:
+
+Put your final answer within \\boxed{} at the end of your response.
+"""
