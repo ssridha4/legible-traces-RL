@@ -119,7 +119,7 @@ def main(model_name):
     traces_dir = root_dir / "outputs" / "traces" / "gsm8k" / "test"
 
     # List of file variants to process
-    variants = ["default", "numbered", "self_check", "structured"]
+    variants = ["default", "numbered", "self_check", "structured", "completions_no_reasoning"]
 
     # Dictionary to store dataframes
     dataframes = {}
@@ -173,5 +173,5 @@ def main(model_name):
 
     
 if __name__ == "__main__":
-    model_name = "Qwen_Qwen3-8B"
+    model_name = "Qwen_Qwen3-0.6B"
     main(model_name)

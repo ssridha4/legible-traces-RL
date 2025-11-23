@@ -57,7 +57,7 @@ if __name__ == "__main__":
         "traces",
         "gsm8k",
         "test",
-        "traces_Qwen_Qwen3-0.6B_no_reasoning.pkl"
+        "traces_Qwen_Qwen3-0.6B_completions_no_reasoning.pkl"
     )
     
     # Read and display first 20 data points

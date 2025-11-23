@@ -82,6 +82,11 @@ def generate_completions(
     trace_csv_path = os.path.join(script_dir, "..", "outputs", "data", "Qwen_Qwen3-8B", "dataframes_default.csv")
     trace_dataset = datasets.load_dataset("csv", data_files=trace_csv_path, split="train")
 
+    # Limit examples if specified
+    if limit:
+        print(f"Limiting dataset to {limit} examples")
+        trace_dataset = trace_dataset.select(range(limit))
+
     chats, questions, answers = create_chats(dataset, system_prompt, trace_dataset)
     
     # Extract sampling parameters
@@ -123,7 +128,7 @@ def generate_completions(
     print(f"Running inference on {len(chats)} prompts")
 
     start_time = time.time()
-    response = model.chat(chats, params, chat_template_kwargs={"enable_thinking": False if kwargs.get("prompt_variant") == "completions_no_reasoning" else True})
+    response = model.chat(chats, params, chat_template_kwargs={"enable_thinking": False if prompt_variant == "completions_no_reasoning" else True})
     inference_time = time.time() - start_time
 
     print(f"Inference completed in {inference_time:.2f} seconds")

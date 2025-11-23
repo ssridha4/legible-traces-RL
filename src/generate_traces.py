@@ -12,7 +12,7 @@ import datasets
 from typing import List, Dict, Any, Optional
 import os
 
-from .utils.prompts import default_prompt_gsm8k_cot, prompt_variant_numbered, prompt_variant_self_check, prompt_variant_structured, prompt_variant_no_reasoning
+from utils.prompts import default_prompt_gsm8k_cot, prompt_variant_numbered, prompt_variant_self_check, prompt_variant_structured, prompt_variant_no_reasoning
 
 prompt_variants = {
     "default": default_prompt_gsm8k_cot,
