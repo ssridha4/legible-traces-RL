@@ -11,8 +11,11 @@ import yaml
 import datasets
 from typing import List, Dict, Any, Optional
 import os
+import pandas as pd
 
 from utils.prompts import default_prompt_gsm8k_cot, prompt_variant_numbered, prompt_variant_self_check, prompt_variant_structured, prompt_variant_no_reasoning
+
+from utils.data_analysis import extract_reasoning_trace, extract_predicted_answer, extract_ground_truth_answer
 
 prompt_variants = {
     "default": default_prompt_gsm8k_cot,
@@ -117,7 +120,7 @@ def generate_traces(
     print(f"Running inference on {len(chats)} prompts")
 
     start_time = time.time()
-    response = model.chat(chats, params, chat_template_kwargs={"enable_thinking": False if kwargs.get("prompt_variant") == "no_reasoning" else True})
+    response = model.chat(chats, params, chat_template_kwargs={"enable_thinking": False if "no_reasoning" in prompt_variant else True})
     inference_time = time.time() - start_time
 
     print(f"Inference completed in {inference_time:.2f} seconds")
@@ -137,14 +140,8 @@ def generate_traces(
     
     for i, output in tqdm(enumerate(response), total=len(response), desc="Processing outputs"):
         completion = tokenizer.decode(output.prompt_token_ids + output.outputs[0].token_ids)
-        # trace = extract_trace(completion, model_name)
-        # extracted_answer = extract_answer(completion, dataset_name, model_name)
-        # score = grade_answer(dataset_name, extracted_answer, answers[i])
-        
         completions.append(completion)
-        # traces.append(trace)
-        # extracted_answers.append(extracted_answer)
-        # scores.append(score)
+
         finished.append(output.finished)
     
     output = {
@@ -275,7 +272,7 @@ if __name__ == "__main__":
         args.model_name = config['model_name']
     if 'dataset_name' in config and args.dataset_name is None:
         args.dataset_name = config['dataset_name']
-    
+
     assert args.model_name is not None, "Model name must be specified via --model_name or config file."
     assert args.dataset_name is not None, "Dataset name must be specified via --dataset_name or config file."
     
@@ -288,16 +285,52 @@ if __name__ == "__main__":
     )
     
     # Save output
-    output_dir = os.path.join(args.output_dir, args.dataset_name.replace("/", "_"), dataset_split)
+    output_dir = os.path.join(args.output_dir, args.dataset_name.replace("/", "_"), args.model_name, dataset_split)
     os.makedirs(output_dir, exist_ok=True)
     
     prompt_variant = call_kwargs["prompt_variant"]
-    output_path = os.path.join(
-        output_dir,
-        f"traces_{args.model_name.replace('/', '_')}_{prompt_variant}.pkl"
-    )
+    if args.limit:
+        output_path = os.path.join(
+            output_dir,
+            f"traces_{prompt_variant}_{args.limit}.pkl"
+        )
+    else:
+        output_path = os.path.join(
+            output_dir,
+            f"traces_{prompt_variant}.pkl"
+        )
     
     with open(output_path, "wb") as f:
         pickle.dump(output, f)
     
     print(f"Generated traces saved to {output_path}")
+
+    df = pd.DataFrame(output['data'])
+
+    # Extract reasoning_trace
+    df['reasoning_trace'] = df['completions'].apply(extract_reasoning_trace)
+    
+    # Extract predicted_answers
+    df['predicted_answers'] = df['completions'].apply(extract_predicted_answer)
+
+    print(f"Average length of traces: {df['reasoning_trace'].apply(len).mean()}")
+    df['gt_answers'] = df['ground_truth_answers'].apply(extract_ground_truth_answer)
+    df['correct'] = df['predicted_answers'] == df['gt_answers']
+    accuracy = df['correct'].mean()
+    print(f"Accuracy of predicted answers: {accuracy}")
+
+    extracted_traces_output_dir = os.path.join(args.output_dir.replace("traces", "extracted_traces"), args.dataset_name.replace("/", "_"), args.model_name, dataset_split)
+    os.makedirs(extracted_traces_output_dir, exist_ok=True)
+
+    if args.limit:
+        extracted_traces_path = os.path.join(
+            extracted_traces_output_dir,
+            f"extracted_traces_{prompt_variant}_{args.limit}.csv"
+        )
+    else:
+        extracted_traces_path = os.path.join(
+            extracted_traces_output_dir,
+            f"extracted_traces_{prompt_variant}.csv"
+        )
+    df.to_csv(extracted_traces_path, index=False)
+    print(f"Saved extracted traces to {extracted_traces_path}")
