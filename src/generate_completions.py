@@ -23,6 +23,7 @@ def create_chats(
     dataset: Any,
     system_prompt: str,
     trace_dataset: Any,
+    trace_len: float,
 ) -> tuple:
     """
     Create chat prompts for the dataset.
@@ -39,7 +40,7 @@ def create_chats(
         question, answer = item["question"], item["answer"]
         trace = trace_dataset[i]["reasoning_trace"]
 
-        question = question + "\n\n<think>\n" + trace + "\n</think>\n"
+        question = question + "\n\n<think>\n" + trace[:int(trace_len * len(trace))] + "\n</think>\n"
 
         chats.append([{
             "role": "system",
@@ -58,10 +59,10 @@ def create_chats(
 def generate_completions(
     model_name: str,
     dataset_name: str,
-    verbose: bool = False,
+    trace_csv_file: str,
+    trace_len: float,
     limit: Optional[int] = None,
     dataset_split: Optional[str] = None,
-    show_sample_prompts: bool = True,
     **kwargs
 ):
     # Load dataset with specified split
@@ -77,17 +78,18 @@ def generate_completions(
 
     ### Create Chats ###
     print(f"Using system prompt: {system_prompt}")
+    print(f"Loading trace dataset from {trace_csv_file}")
     # Get the path relative to this script's location
-    script_dir = os.path.dirname(os.path.abspath(__file__))
-    trace_csv_path = os.path.join(script_dir, "..", "outputs", "data", "Qwen_Qwen3-8B", "dataframes_default.csv")
-    trace_dataset = datasets.load_dataset("csv", data_files=trace_csv_path, split="train")
+    # script_dir = os.path.dirname(os.path.abspath(__file__))
+    # trace_csv_path = os.path.join(script_dir, "..", "outputs", "data", "Qwen_Qwen3-8B", "dataframes_default.csv")
+    trace_dataset = datasets.load_dataset("csv", data_files=trace_csv_file, split="train")
 
     # Limit examples if specified
     if limit:
         print(f"Limiting dataset to {limit} examples")
         trace_dataset = trace_dataset.select(range(limit))
 
-    chats, questions, answers = create_chats(dataset, system_prompt, trace_dataset)
+    chats, questions, answers = create_chats(dataset, system_prompt, trace_dataset, trace_len)
     
     # Extract sampling parameters
     temperature = kwargs.pop("temperature", None)
@@ -141,21 +143,12 @@ def generate_completions(
     tokenizer = AutoTokenizer.from_pretrained(model_name, use_fast=False, token=hf_token)
     
     completions = []
-    traces = []
-    extracted_answers = []
-    scores = []
     finished = []
     
     for i, output in tqdm(enumerate(response), total=len(response), desc="Processing outputs"):
         completion = tokenizer.decode(output.prompt_token_ids + output.outputs[0].token_ids)
-        # trace = extract_trace(completion, model_name)
-        # extracted_answer = extract_answer(completion, dataset_name, model_name)
-        # score = grade_answer(dataset_name, extracted_answer, answers[i])
-        
         completions.append(completion)
-        # traces.append(trace)
-        # extracted_answers.append(extracted_answer)
-        # scores.append(score)
+
         finished.append(output.finished)
     
     output = {
@@ -178,24 +171,16 @@ def generate_completions(
         "data": {
             "questions": questions,
             "completions": completions,
-            # "traces": traces,
-            # "extracted_answers": extracted_answers,
-            # "scores": scores,
             "ground_truth_answers": answers,
             "finished": finished,
         }
     }
     
-    if verbose:
-        print("Finished!")
-        accuracy = sum(scores) / len(scores) if scores else 0
-        print(f"Accuracy: {accuracy:.2%}")
-    
     return output
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(
-        description="Generate reasoning traces for evaluation"
+        description="Generate completions for evaluation"
     )
     parser.add_argument(
         "--model_name",
@@ -210,10 +195,18 @@ if __name__ == "__main__":
         help="Name of the dataset ('gsm8k', 'math', 'gpqa').",
     )
     parser.add_argument(
-        "--output_dir",
+        "--trace_csv_file",
         type=str,
-        default="outputs/traces/",
-        help="Directory to save generated traces.",
+        default=None,
+        required=True,
+        help="Path to the extracted trace dataset (CSV file) for reasoning traces.",
+    )
+    parser.add_argument(
+        "--trace_len",
+        type=float,
+        default=None,
+        required=True,
+        help="Trace length to use  in the prompt. (0.5, 0.75, 1)",
     )
     parser.add_argument(
         "--config",
@@ -277,7 +270,7 @@ if __name__ == "__main__":
     dataset_split = args.dataset_split
     if dataset_split is None and "dataset_split" in config:
         dataset_split = config["dataset_split"]
-    
+    assert dataset_split in args.trace_csv_file, "Dataset split must be in the trace CSV file"
     # Override tensor_parallel_size from command line if provided
     if args.tensor_parallel_size is not None:
         call_kwargs["tensor_parallel_size"] = args.tensor_parallel_size
@@ -293,20 +286,31 @@ if __name__ == "__main__":
     output = generate_completions(
         model_name=args.model_name,
         dataset_name=args.dataset_name,
+        trace_csv_file=args.trace_csv_file,
+        trace_len=args.trace_len,
         limit=args.limit,
         dataset_split=dataset_split,
         **call_kwargs
     )
     
     # Save output
-    output_dir = os.path.join(args.output_dir, args.dataset_name.replace("/", "_"), dataset_split)
+    base_dir = "/".join(args.trace_csv_file.split("/")[:-1])
+    trace_prompt_type = "_".join(args.trace_csv_file.split("/")[-1].split("_")[1:]).split(".")[0]
+    prompt_variant = call_kwargs["prompt_variant"]
+
+    output_dir = f"{base_dir}/completions/{args.model_name}/length/trace_length_{args.trace_len}/trace_{prompt_variant}"
     os.makedirs(output_dir, exist_ok=True)
     
-    prompt_variant = call_kwargs["prompt_variant"]
-    output_path = os.path.join(
-        output_dir,
-        f"traces_{args.model_name.replace('/', '_')}_{prompt_variant}.pkl"
-    )
+    if args.limit:
+        output_path = os.path.join(
+            output_dir,
+            f"completions_{trace_prompt_type}_{args.limit}.pkl"
+        )
+    else:
+        output_path = os.path.join(
+            output_dir,
+            f"completions_{trace_prompt_type}.pkl"
+        )
     
     with open(output_path, "wb") as f:
         pickle.dump(output, f)
