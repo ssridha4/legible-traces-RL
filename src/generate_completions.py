@@ -11,6 +11,7 @@ import yaml
 import datasets
 from typing import List, Dict, Any, Optional
 import os
+import numpy as np
 
 from utils.prompts import prompt_variant_completions_no_reasoning, prompt_variant_completions_reasoning
 
@@ -63,6 +64,7 @@ def generate_completions(
     trace_len: float,
     limit: Optional[int] = None,
     dataset_split: Optional[str] = None,
+    save_logprobs: bool = False,
     **kwargs
 ):
     # Load dataset with specified split
@@ -98,7 +100,17 @@ def generate_completions(
     top_p = kwargs.pop("top_p", None)
 
     # Create sampling params
-    sampling_kwargs = {"max_tokens": max_tokens, "seed": seed}
+    if save_logprobs:
+        sampling_kwargs = {"max_tokens": max_tokens, 
+                            "seed": seed,
+                            "logprobs": 1,
+                            # "output_logprobs": True 
+                            }
+    else:
+        sampling_kwargs = {"max_tokens": max_tokens, 
+                            "seed": seed
+                            }
+
     if temperature is not None:
         sampling_kwargs["temperature"] = temperature
     if top_p is not None:
@@ -144,37 +156,69 @@ def generate_completions(
     
     completions = []
     finished = []
+    if save_logprobs:
+        sequence_logprob = []
+        confidence_list = []
     
     for i, output in tqdm(enumerate(response), total=len(response), desc="Processing outputs"):
         completion = tokenizer.decode(output.prompt_token_ids + output.outputs[0].token_ids)
         completions.append(completion)
 
         finished.append(output.finished)
+
+        # Save logprobs and confidence scores if specified
+        if save_logprobs:
+            # --- Direct sequence-level logprob ---
+            seq_logprob = output.outputs[0].cumulative_logprob      # float or None
+            sequence_logprob.append(seq_logprob)
+            seq_len = len(output.outputs[0].token_ids)
+            confidence = float(np.exp(seq_logprob / max(seq_len, 1)))
+
+            confidence_list.append(confidence)
     
-    output = {
-        "metadata": {
-            "model_name": model_name,
-            "dataset_name": dataset_name,
-            "collected_on": str(datetime.now()),
-            "system_prompt": system_prompt,
-            "num_gpus": torch.cuda.device_count(),
-            "generation_params": {
-                "temperature": temperature,
-                "max_tokens": max_tokens,
-                "top_p": top_p,
-                "seed": seed,
+    if save_logprobs:
+        output = {
+            "metadata": {
+                "model_name": model_name,
+                "dataset_name": dataset_name,
+                "collected_on": str(datetime.now()),
+                "system_prompt": system_prompt,
+                "num_gpus": torch.cuda.device_count(),
+                "generation_params": {
+                    "temperature": temperature,
+                    "max_tokens": max_tokens,
+                    "top_p": top_p,
+                    "seed": seed,
+                },
+                "kwargs": {k: str(v) for k, v in kwargs.items()},
+                "inference_time": inference_time,
+                "throughput": len(chats) / inference_time if inference_time > 0 else 0,
             },
-            "kwargs": {k: str(v) for k, v in kwargs.items()},
-            "inference_time": inference_time,
-            "throughput": len(chats) / inference_time if inference_time > 0 else 0,
-        },
-        "data": {
-            "questions": questions,
-            "completions": completions,
-            "ground_truth_answers": answers,
-            "finished": finished,
+            "data": {
+                "questions": questions,
+                "completions": completions,
+                "ground_truth_answers": answers,
+                "finished": finished,
+                "sequence_logprob": sequence_logprob,
+                "confidence": confidence_list
+            }
         }
-    }
+    else:
+        output = {
+            "metadata": {
+                "model_name": model_name,
+                "dataset_name": dataset_name,
+                "collected_on": str(datetime.now()),
+                "system_prompt": system_prompt,
+                "num_gpus": torch.cuda.device_count(),
+            },
+            "data": {
+                "questions": questions,
+                "completions": completions,
+                "ground_truth_answers": answers,
+                "finished": finished
+            }
+        }
     
     return output
 
@@ -239,6 +283,12 @@ if __name__ == "__main__":
         help="Prompt variant to use (default: 'default').",
         choices=list(prompt_variants.keys()),
     )
+    parser.add_argument(
+        "--save_logprobs",
+        type=bool,
+        default=False,
+        help="Save logprobs and confidence scores.",
+    )
     args = parser.parse_args()
 
     ### Loading YAML Config ###
@@ -290,6 +340,7 @@ if __name__ == "__main__":
         trace_len=args.trace_len,
         limit=args.limit,
         dataset_split=dataset_split,
+        save_logprobs=args.save_logprobs,
         **call_kwargs
     )
     
@@ -301,18 +352,19 @@ if __name__ == "__main__":
     output_dir = f"{base_dir}/completions/{args.model_name}/length/trace_length_{args.trace_len}/trace_{prompt_variant}"
     os.makedirs(output_dir, exist_ok=True)
     
+    completions_name = "completions_logprobs" if args.save_logprobs else "completions"
     if args.limit:
         output_path = os.path.join(
             output_dir,
-            f"completions_{trace_prompt_type}_{args.limit}.pkl"
+            f"{completions_name}_{trace_prompt_type}_{args.limit}.pkl"
         )
     else:
         output_path = os.path.join(
             output_dir,
-            f"completions_{trace_prompt_type}.pkl"
+            f"{completions_name}_{trace_prompt_type}.pkl"
         )
     
     with open(output_path, "wb") as f:
         pickle.dump(output, f)
     
-    print(f"Generated traces saved to {output_path}")
+    print(f"Generated completions saved to {output_path}")
