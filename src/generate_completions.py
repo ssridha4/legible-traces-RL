@@ -295,7 +295,7 @@ if __name__ == "__main__":
     
     # Save output
     base_dir = "/".join(args.trace_csv_file.split("/")[:-1])
-    trace_prompt_type = "_".join(args.trace_csv_file.split("/")[-1].split("_")[1:]).split(".")[0]
+    trace_prompt_type = "_".join(args.trace_csv_file.split("/")[-1].split("_")[2:]).split(".")[0]
     prompt_variant = call_kwargs["prompt_variant"]
 
     output_dir = f"{base_dir}/completions/{args.model_name}/length/trace_length_{args.trace_len}/trace_{prompt_variant}"
