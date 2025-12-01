@@ -65,6 +65,7 @@ if __name__ == "__main__":
     extracted_traces_files = glob.glob(os.path.join(extracted_traces_dir, "*.csv"))
 
     completions_files = [f for f in completions_files if "no_reasoning" not in f.split("/")[-1]]
+    completions_files = [f for f in completions_files if "logprobs" in f.split("/")[-1]]
     extracted_traces_files = [f for f in extracted_traces_files if "no_reasoning" not in f.split("/")[-1]]
 
     assert len(completions_files) == len(extracted_traces_files), f"Number of completions and extracted traces files must be the same: {len(completions_files)} != {len(extracted_traces_files)}"
@@ -75,7 +76,7 @@ if __name__ == "__main__":
     # ---- Load all PKL files ----
     all_slm_data = []
     for prompt_variant_llm in prompt_variants_llm:
-        with open(f"{completions_dir}/completions_{prompt_variant_llm}.pkl", "rb") as f:
+        with open(f"{completions_dir}/completions_logprobs_{prompt_variant_llm}.pkl", "rb") as f:
             data = pickle.load(f)["data"]
             all_slm_data.append(data)
     
@@ -90,22 +91,22 @@ if __name__ == "__main__":
     # ---- Traverse all PKL lists together ----
     for idx in range(N):
         # Extract the index-th element from each file
-        items = [{"completions": d["completions"][idx], "ground_truth_answers": d["ground_truth_answers"][idx]} for d in all_slm_data]   # each item is a dictionary
+        items = [{"completions": d["completions"][idx], "ground_truth_answers": d["ground_truth_answers"][idx], "confidence": d["confidence"][idx]} for d in all_slm_data]   # each item is a dictionary
 
         predicted_answers = [extract_predicted_answer(item["completions"]) for item in items]
         ground_truth_answers = [extract_ground_truth_answer(item["ground_truth_answers"]) for item in items]
         correct = [a == b for a, b in zip(predicted_answers, ground_truth_answers)]
 
-        cuurent_correct_llm_prompt_variant = []
-        cuurent_incorrect_llm_prompt_variant = []
+        current_correct_llm_prompt_variant = []
+        current_incorrect_llm_prompt_variant = []
         for prompt_idx, is_correct in enumerate(correct):
             if is_correct:
-                cuurent_correct_llm_prompt_variant.append(prompt_variants_llm[prompt_idx])
+                current_correct_llm_prompt_variant.append((prompt_variants_llm[prompt_idx], items[prompt_idx]["confidence"]))
             else:
-                cuurent_incorrect_llm_prompt_variant.append(prompt_variants_llm[prompt_idx])
+                current_incorrect_llm_prompt_variant.append((prompt_variants_llm[prompt_idx], items[prompt_idx]["confidence"]))
 
-        correct_llm_prompt_variant.append(cuurent_correct_llm_prompt_variant)
-        incorrect_llm_prompt_variant.append(cuurent_incorrect_llm_prompt_variant)
+        correct_llm_prompt_variant.append(current_correct_llm_prompt_variant)
+        incorrect_llm_prompt_variant.append(current_incorrect_llm_prompt_variant)
 
     all_llm_data = {}
     for prompt_variant_llm in prompt_variants_llm:
@@ -125,32 +126,60 @@ if __name__ == "__main__":
     skipped_examples = 0
     no_reasoning_examples = 0
     no_correct_examples = 0
-    no_incorrect_examples = 0
+    no_confidence_examples = 0
     for idx in range(N_llm):
         correct_prompt_variants, incorrect_prompt_variants = correct_llm_prompt_variant[idx], incorrect_llm_prompt_variant[idx]
-        correct_llm_data = [all_llm_data[prompt_variant_llm][idx] for prompt_variant_llm in correct_prompt_variants]
-        incorrect_llm_data = [all_llm_data[prompt_variant_llm][idx] for prompt_variant_llm in incorrect_prompt_variants]
+        correct_llm_data = [(all_llm_data[prompt_variant_llm][idx], confidence) for prompt_variant_llm, confidence in correct_prompt_variants]
+        incorrect_llm_data = [(all_llm_data[prompt_variant_llm][idx], confidence) for prompt_variant_llm, confidence in incorrect_prompt_variants]
         
-        if len(correct_llm_data) > 0 and len(incorrect_llm_data) > 0:
-            for correct_data in correct_llm_data:
-                for incorrect_data in incorrect_llm_data:
-                    if len(correct_data["reasoning_trace"]) > 0 and len(incorrect_data["reasoning_trace"]) > 0:
-                        dpo_data.append({
+        if len(correct_llm_data) > 0:
+            # print(correct_llm_data[0].keys())
+            confidence_scores = [confidence for _, confidence in correct_llm_data]
+            chosen_idx = confidence_scores.index(max(confidence_scores))
+            if len(set(confidence_scores)) == 1 and len(correct_llm_data) > 1:
+                print(confidence_scores)
+                print(correct_llm_data)
+                print(f"Skipping example {idx} because it has equal confidence scores")
+                no_confidence_examples += 1
+                continue
+            for i, (correct_data, confidence) in enumerate(correct_llm_data):
+                if i == chosen_idx:
+                    continue
+                if len(correct_llm_data[chosen_idx][0]["reasoning_trace"]) == 0:
+                    print(f"Skipping example {idx} because it has no reasoning trace")
+                    no_reasoning_examples += 1
+                    skipped_examples += 1
+                    continue
+                if len(correct_data["reasoning_trace"]) > 0:
+                    dpo_data.append({
                             "prompt": correct_data["questions"],
-                            "chosen": correct_data["reasoning_trace"],
-                            "rejected": incorrect_data["reasoning_trace"],
+                            "chosen": correct_llm_data[chosen_idx][0]["reasoning_trace"],
+                            "rejected": correct_data["reasoning_trace"],
+                            "chosen_score": correct_llm_data[chosen_idx][1],
+                            "rejected_score": confidence,
                         })
-                    else:
-                        print(f"Skipping example {idx} because it has no reasoning trace")
-                        no_reasoning_examples += 1
-                        skipped_examples += 1
-                        continue
+                else:
+                    print(f"Skipping example {idx} because it has no reasoning trace")
+                    no_reasoning_examples += 1
+                    skipped_examples += 1
+                    continue
+            for incorrect_data, confidence in incorrect_llm_data:
+                if len(incorrect_data["reasoning_trace"]) > 0:
+                    dpo_data.append({
+                        "prompt": correct_llm_data[chosen_idx][0]["questions"],
+                        "chosen": correct_llm_data[chosen_idx][0]["reasoning_trace"],
+                        "rejected": incorrect_data["reasoning_trace"],
+                        "chosen_score": correct_llm_data[chosen_idx][1],
+                        "rejected_score": -confidence,
+                    })
+                else:
+                    print(f"Skipping example {idx} because it has no reasoning trace")
+                    no_reasoning_examples += 1
+                    skipped_examples += 1
+                    continue
         else:
-            if len(correct_llm_data) == 0:
-                no_correct_examples += 1
-            if len(incorrect_llm_data) == 0:
-                no_incorrect_examples += 1
-            print(f"Skipping example {idx} because it has no correct ({len(correct_llm_data)}) or incorrect ({len(incorrect_llm_data)}) LLM prompt variants")
+            no_correct_examples += 1
+            print(f"Skipping example {idx} because it has no correct LLM prompt variants")
             skipped_examples += 1
             continue
         
@@ -161,9 +190,9 @@ if __name__ == "__main__":
     print(f"DPO data length: {len(dpo_data)}")
     print(f"No reasoning examples: {no_reasoning_examples}")
     print(f"No correct examples: {no_correct_examples}")
-    print(f"No incorrect examples: {no_incorrect_examples}")
+    print(f"No confidence examples: {no_confidence_examples}")
     # Save DPO data jsonl 
-    dpo_data_path = os.path.join(completions_dir, "preference_data.jsonl")
+    dpo_data_path = os.path.join(completions_dir, "confidence_preference_data.jsonl")
     with open(dpo_data_path, "w") as f:
         for item in dpo_data:
             f.write(json.dumps(item) + "\n")

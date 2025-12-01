@@ -3,9 +3,9 @@
 # Set variables
 PROMPT_VARIANTS=("default" "numbered" "self_check" "structured")
 CONFIG="configs/gsm8k/test/600M/no_reasoning_completion.yaml"
-TRACE_LEN=0.75
+TRACE_LEN=0.5
 LIMIT=""    # Empty means "not provided"
-SAVE_LOGPROBS=False
+SAVE_LOGPROBS=True
 
 for VARIANT in "${PROMPT_VARIANTS[@]}"; do
     echo "Running for prompt variant: $VARIANT"
