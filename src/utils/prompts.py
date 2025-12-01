@@ -55,3 +55,16 @@ Formatting instructions:
 
 Put your final answer within \\boxed{} at the end of your response.
 """
+
+prompt_remove_answer = """
+You are an AI assistant that cleans reasoning traces. 
+Use the question and the answer given between <answer> and </answer> tags, and then remove the occurences of the answer from the trace. Remove the sentences having the answer from the trace, keep other steps and lines the same.
+
+The question is given between <question> and </question> tags.
+The answer is given between <answer> and </answer> tags.
+The original trace is given between <trace> and </trace> tags. 
+
+Formatting instructions:
+
+Put your cleaned reasoning steps within <cleaned_trace> and </cleaned_trace> tags which doesn't contain the answer in any form.
+"""
